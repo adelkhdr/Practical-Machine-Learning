@@ -1,0 +1,160 @@
+---
+title: "Final Project"
+author: "Adel"
+date: "September 20, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,fig.show = TRUE)
+```
+
+## Project Description
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+
+# Data
+The training data for this project are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+# Reading the Needed Libraries
+First we read all the required libraries:
+```{r libs, echo=TRUE,message=FALSE}
+library(AppliedPredictiveModeling);
+library(caret);
+library(rpart)
+library(ElemStatLearn)
+library(pgmm);
+library(rpart);
+library(gbm);
+library(lubridate)
+library(forecast);
+library(randomForest)
+library(e1071)
+```
+
+# Reading Data
+First we read the data from the sources. Let's call the second set as validating set instead of testing set and keep it for final evaluation of the built models. Instead, we could devide the first set to training and testing to train the model and primary evaluation of the developed models.
+```{r}
+trainUrl= "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+validtUrl = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+Bigtraining = read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+validating = read.csv(url(validtUrl), na.strings=c("NA","#DIV/0!",""))
+
+set.seed(1359)
+inTrain=createDataPartition(y=Bigtraining$classe,p=0.7,list = FALSE)
+training=Bigtraining[inTrain,]
+testing=Bigtraining[-inTrain,]
+```
+
+# Preparing the Data
+Now we need to remove bunch of columns with NA value and polish the data. We remove all the columns that have more than 30% misssing data.
+
+```{r}
+#Defining what columns has not-NA values
+validCols= colnames(training)[colSums(is.na(training)) < 0.3*dim(training)[1]]
+mytrain=data.frame(subset(training,select=validCols))
+mytest=data.frame(subset(testing,select=validCols))
+```
+
+The other cleaning process is regarding to removind the variables with low vaiability or near zero variables. Besides, we need to remove the first column since it shows the index of records in a sorted way and does not provide any information about the data.
+```{r}
+tranz= nearZeroVar(mytrain, saveMetrics = TRUE)
+tstnz= nearZeroVar(mytest, saveMetrics = TRUE)
+mytrain=mytrain[,tranz$nzv==FALSE]
+mytest=mytest[,tstnz$nzv==FALSE]
+mytrain=mytrain[-c(1)]
+mytest=mytest[-c(1)]
+```
+
+We need to unify the variables in training and vlaidating sets. So we could clean the validating set so that only carries the same column as training and testing. 
+
+```{r}
+trcol=colnames(mytrain[-c(58)])
+validating=validating[trcol]
+```
+
+# Starting the Prediction
+Now that we have data polished, we can start developing the predicting models. Since the independent variable has a factor type, we can not use general regression method for that. Instead, the most efficient methods for this prediction are classifying type of models like random forest, decision trees, boosting, etc.
+
+# Decision Trees Model
+```{r}
+library(rattle)
+library(rpart.plot)
+dtmodel=rpart(classe~.,method="class",data = mytrain)
+fancyRpartPlot(dtmodel)
+
+dtpredict=predict(dtmodel,mytest,type = "class")
+confmat=confusionMatrix(dtpredict,mytest$classe)
+confmat
+plot(confmat$table,main=paste("The DT confusion matrix with accuracy of",round(confmat$overall["Accuracy"],4)))
+```
+
+As it is clear form the results the prediction works great here and has only one error in predicting a class "D" as class "E".
+
+# Random Forest Model
+
+```{r}
+rfmodel= randomForest(classe ~ ., data=mytrain)
+rfpredict=predict(rfmodel,mytest)
+rfconfmat=confusionMatrix(rfpredict,mytest$classe)
+rfconfmat
+
+difference=rfpredict==mytest$classe
+qplot(rfpredict,classe,colour=difference,data=mytest,geom = "jitter")
+
+plot(rfconfmat$table,main=paste("The RF confusion matrix with accuracy of",round(rfconfmat$overall["Accuracy"],4)))
+```
+
+# Boosting Model
+```{r}
+fitControl= trainControl(method = "repeatedcv",number = 4,repeats = 1)
+Bmodel=train(classe~.,method="gbm",data=mytrain,trControl=fitControl,
+              verbose=FALSE)
+Bpredict=predict(Bmodel,mytest)
+Bconfmat=confusionMatrix(Bpredict,mytest$classe)
+Bconfmat
+
+differenceB=Bpredict==mytest$classe
+qplot(Bpredict,classe,colour=differenceB,data=mytest,geom = "jitter")
+
+plot(Bconfmat$table,main=paste("The GBM confusion matrix with accuracy of",round(Bconfmat$overall["Accuracy"],4)))
+```
+
+# Combined Method
+Finally we can combine all the mdoels together to see if we could get a better model. However, the already developed model by random forest works excellent.
+```{r}
+predDF=data.frame(dtpredict,rfpredict,Bpredict,classe=mytest$classe)
+Combmodel=randomForest(classe~.,data=predDF)
+Compred=predict(Combmodel,predDF)
+Comconfus=confusionMatrix(Compred,mytest$classe)
+Comconfus
+
+plot(Comconfus$table,main=paste("The GBM confusion matrix with accuracy of",round(Comconfus$overall["Accuracy"],4)))
+```
+
+The results of the combined model shows that the obtained model is as good as the random forest model.
+As a conclusion, the best model that I select according to the obtained results is the random forest model. In the next section the random model is applied on the validation set to figure out its prediction quality.
+
+# Final Validation
+
+At the end we examine the capability of the selected model from previous sections, that is random forest, on the validation set.
+Before start we need to match the type of validation set with the training set.
+
+```{r}
+#common <- intersect(names(mytrain), names(validating))
+for (p in colnames(validating)) { if (class(mytrain[[p]]) == "factor") { levels(validating[[p]]) <- levels(mytrain[[p]]) } } 
+valpred=predict(rfmodel,validating)
+validating$classe=valpred
+qplot(user_name,fill=classe,data=validating,main = "Prediction of Class for each indidvidual")
+```
+
+
