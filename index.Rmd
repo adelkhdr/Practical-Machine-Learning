@@ -155,6 +155,7 @@ for (p in colnames(validating)) { if (class(mytrain[[p]]) == "factor") { levels(
 valpred=predict(rfmodel,validating)
 validating$classe=valpred
 qplot(user_name,fill=classe,data=validating,main = "Prediction of Class for each indidvidual")
+validating$classe
 ```
 
 
